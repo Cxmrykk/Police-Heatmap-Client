@@ -1,0 +1,71 @@
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.controls-panel {
+  padding: 10px;
+  background-color: #333;
+  color: white;
+  display: flex;
+  gap: 20px;
+  /* Increased gap between control groups */
+  align-items: flex-start;
+  /* Align items to the top */
+  flex-wrap: wrap;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.controls-panel>div {
+  /* Style for each group (Time Windows, Display Mode) */
+  display: flex;
+  flex-direction: column;
+  /* Stack h3 and labels vertically */
+  gap: 5px;
+}
+
+.controls-panel h3 {
+  margin-top: 0;
+  margin-bottom: 5px;
+  font-size: 0.9em;
+  font-weight: bold;
+}
+
+.controls-panel label.control-item {
+  /* Class for individual labels */
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.controls-panel input[type="checkbox"],
+.controls-panel input[type="radio"] {
+  cursor: pointer;
+  margin-right: 3px;
+}
+
+.map-container-wrapper {
+  flex-grow: 1;
+  position: relative;
+}
+
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 1.5em;
+  z-index: 20;
+}
