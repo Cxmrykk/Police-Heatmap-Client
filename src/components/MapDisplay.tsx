@@ -1,41 +1,74 @@
 import React, { useEffect, useRef, useState } from 'react';
-import mapboxgl, { LngLatBounds, Map } from 'mapbox-gl';
-import type { DensityApiResponse, DisplayMode } from '../types';
+// Corrected imports for Mapbox GL types
+import mapboxgl, {
+  LngLatBounds,
+  Map,
+  ErrorEvent // Specifically for the 'error' event
+  // MapboxEvent removed as it's deprecated
+} from 'mapbox-gl';
+import type { DensityApiResponse, DisplayMode, DensitySourceType } from '../types';
 import {
   debounce,
   calculateCellPolygon,
   createHeatmapPoints,
   getMapboxOpacityExpression,
-  TIME_WINDOWS, // Import TIME_WINDOWS to access its length and properties
-  // MIN_API_LEVEL, // Not directly used here, but currentApiLevel prop will respect it
+  TIME_WINDOWS,
 } from '../utils/mapUtils';
 import '../styles/MapDisplay.css';
+import type { ExpressionSpecification } from 'mapbox-gl';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
-// Define opacity parameters for heatmap layers
-const HEATMAP_MAX_OPACITY = 0.85; // Opacity for the newest time window
-const HEATMAP_MIN_OPACITY = 0.40; // Opacity for the oldest time window
+// ... (rest of the constants and interface remain the same) ...
+const HEATMAP_MAX_OPACITY = 0.85;
+const HEATMAP_MIN_OPACITY = 0.40;
+
+const BASE_RADIUS_ZOOM_STOPS: Record<number, number> = {
+  3: 10,
+  7: 15,
+  9: 20,
+  12: 25,
+  15: 20,
+  18: 15,
+};
+
+const DENSITY_TO_RADIUS_MULTIPLIER_STOPS: Array<[number, number]> = [
+  [0, 0.6],
+  [50, 0.8],
+  [150, 1.0],
+  [255, 1.5],
+];
 
 interface MapDisplayProps {
   selectedTimeWindows: Set<number>;
   onMapIdle: (map: Map) => void;
-  currentApiLevel: number; // This will be >= MIN_API_LEVEL from App.tsx
+  currentApiLevel: number;
   currentBounds: LngLatBounds | null;
   displayMode: DisplayMode;
+  densitySource: DensitySourceType;
+  heatmapRadiusScale: number;
 }
+
 
 const MapDisplay: React.FC<MapDisplayProps> = ({
   selectedTimeWindows,
   onMapIdle,
-  currentApiLevel, // Will be >= 1
+  currentApiLevel,
   currentBounds,
   displayMode,
+  densitySource,
+  heatmapRadiusScale,
 }) => {
+  // ... (refs and state remain the same) ...
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isMapLoaded, setIsMapLoaded] = useState<boolean>(false);
+
+  const heatmapRadiusScaleRef = useRef(heatmapRadiusScale);
+  useEffect(() => {
+    heatmapRadiusScaleRef.current = heatmapRadiusScale;
+  }, [heatmapRadiusScale]);
 
   const onMapIdleRef = useRef(onMapIdle);
   useEffect(() => {
@@ -47,15 +80,42 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
     return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '0,0,0';
   };
 
+  const getHeatmapRadiusExpression = (ageBasedRadiusMultiplier: number): ExpressionSpecification => {
+    const densityRadiusMultiplierExpression: ExpressionSpecification = [
+      'interpolate',
+      ['linear'],
+      ['get', 'density'],
+    ];
+    DENSITY_TO_RADIUS_MULTIPLIER_STOPS.forEach(([density, multiplier]) => {
+      densityRadiusMultiplierExpression.push(density, multiplier);
+    });
 
-  // Effect for map initialization
+    const radiusExpression: ExpressionSpecification = ['interpolate', ['linear'], ['zoom']];
+
+    Object.entries(BASE_RADIUS_ZOOM_STOPS).forEach(([zoomStr, baseRadiusAtZoom]) => {
+      const zoom = parseFloat(zoomStr);
+      radiusExpression.push(
+        zoom,
+        [
+          '*',
+          heatmapRadiusScaleRef.current,
+          ageBasedRadiusMultiplier,
+          baseRadiusAtZoom,
+          densityRadiusMultiplierExpression
+        ]
+      );
+    });
+    return radiusExpression;
+  };
+
   useEffect(() => {
     if (!MAPBOX_TOKEN) {
-      console.error("Mapbox token is not set. Cannot initialize map.");
-      // Optionally, set an error state to inform the user in the UI
+      console.error("MapDisplay: Mapbox token is not set. Cannot initialize map.");
       return;
     }
-    if (mapRef.current || !mapContainerRef.current) return;
+    if (mapRef.current || !mapContainerRef.current) {
+      return;
+    }
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
     const map = new Map({
@@ -66,11 +126,19 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
     });
     mapRef.current = map;
 
+    // Correctly typed error handler using ErrorEvent
+    const mapErrorHandler = (e: ErrorEvent) => {
+      // ErrorEvent is guaranteed to have an 'error' property
+      console.error('Mapbox GL Error:', e.error?.message || e.error);
+    };
+    map.on('error', mapErrorHandler);
+
+
     const handleLoad = () => {
       setIsMapLoaded(true);
       onMapIdleRef.current(map);
 
-      const timeWindowsForLayering = [...TIME_WINDOWS].reverse(); // Layers added from oldest to newest for correct overlap if needed
+      const timeWindowsForLayering = [...TIME_WINDOWS].reverse();
 
       timeWindowsForLayering.forEach(tw => {
         const sourceId = `source-${tw.id}`;
@@ -98,6 +166,12 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
 
         const heatmapLayerId = `heatmap-layer-${tw.id}`;
         if (!map.getLayer(heatmapLayerId)) {
+          const numTimeWindows = TIME_WINDOWS.length;
+          const ageFactor = numTimeWindows > 1 ? tw.id / (numTimeWindows - 1) : 0;
+          const ageBasedRadiusMultiplier = 0.7 + ageFactor * 0.6;
+          const intensityMultiplier = 1.2 - ageFactor * 0.4;
+          const radiusExpr = getHeatmapRadiusExpression(ageBasedRadiusMultiplier);
+
           map.addLayer({
             id: heatmapLayerId,
             type: 'heatmap',
@@ -105,23 +179,17 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
             maxzoom: 20,
             paint: {
               'heatmap-weight': [
-                'interpolate',
-                ['linear'],
-                ['get', 'density'],
-                0, 0,
-                1, 0.1,
-                255, 1
+                'interpolate', ['linear'], ['get', 'density'],
+                0, 0, 1, 0.01, 255, 1
               ],
               'heatmap-intensity': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                3, 1,
-                7, 1.5,
-                9, 2,
-                12, 3,
-                15, 5,
-                18, 8
+                'interpolate', ['linear'], ['zoom'],
+                3, Math.max(0.1, 1 * intensityMultiplier),
+                7, Math.max(0.1, 1.5 * intensityMultiplier),
+                9, Math.max(0.2, 2 * intensityMultiplier),
+                12, Math.max(0.3, 3 * intensityMultiplier),
+                15, Math.max(0.5, 5 * intensityMultiplier),
+                18, Math.max(0.8, 8 * intensityMultiplier)
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -133,18 +201,8 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
                 0.8, `rgba(${hexToRgb(tw.color)}, 0.8)`,
                 1, `rgba(${hexToRgb(tw.color)}, 1)`
               ],
-              'heatmap-radius': [
-                'interpolate',
-                ['linear'],
-                ['zoom'],
-                3, 15,
-                7, 20,
-                9, 25,
-                12, 30,
-                15, 25,
-                18, 20
-              ],
-              'heatmap-opacity': 0, // Initial: managed by visibility effect
+              'heatmap-radius': radiusExpr,
+              'heatmap-opacity': 0,
             }
           });
         }
@@ -164,11 +222,31 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
       map.off('load', handleLoad);
       map.off('moveend', debouncedMapIdleHandler);
       map.off('zoomend', debouncedMapIdleHandler);
+      map.off('error', mapErrorHandler);
       if (mapRef.current) mapRef.current.remove();
       mapRef.current = null;
       setIsMapLoaded(false);
     };
   }, []);
+
+  // ... (rest of the useEffects and updateLayerVisibility function remain the same) ...
+  useEffect(() => {
+    if (!isMapLoaded || !mapRef.current || displayMode !== 'heatmap') {
+      return;
+    }
+    const map = mapRef.current;
+
+    TIME_WINDOWS.forEach(tw => {
+      const heatmapLayerId = `heatmap-layer-${tw.id}`;
+      if (map.getLayer(heatmapLayerId)) {
+        const numTimeWindows = TIME_WINDOWS.length;
+        const ageFactor = numTimeWindows > 1 ? tw.id / (numTimeWindows - 1) : 0;
+        const ageBasedRadiusMultiplier = 0.7 + ageFactor * 0.6;
+        const newRadiusExpr = getHeatmapRadiusExpression(ageBasedRadiusMultiplier);
+        map.setPaintProperty(heatmapLayerId, 'heatmap-radius', newRadiusExpr);
+      }
+    });
+  }, [heatmapRadiusScale, isMapLoaded, displayMode]);
 
 
   const updateLayerVisibility = (
@@ -177,39 +255,37 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
     currentSelectedTimeWindows: Set<number>
   ) => {
     const numTimeWindows = TIME_WINDOWS.length;
-
     TIME_WINDOWS.forEach(tw => {
       const fillLayerId = `fill-layer-${tw.id}`;
       const heatmapLayerId = `heatmap-layer-${tw.id}`;
       const isSelected = currentSelectedTimeWindows.has(tw.id);
 
+      let fillVisibility: 'visible' | 'none' = 'none';
+      if (isSelected && currentDisplayMode === 'fill') {
+        fillVisibility = 'visible';
+      }
       if (map.getLayer(fillLayerId)) {
-        map.setLayoutProperty(fillLayerId, 'visibility', (isSelected && currentDisplayMode === 'fill') ? 'visible' : 'none');
+        map.setLayoutProperty(fillLayerId, 'visibility', fillVisibility);
+      }
+
+      let heatmapVisibility: 'visible' | 'none' = 'none';
+      let heatmapOpacityValue = 0;
+      if (isSelected && currentDisplayMode === 'heatmap') {
+        heatmapVisibility = 'visible';
+        if (numTimeWindows <= 1) heatmapOpacityValue = HEATMAP_MAX_OPACITY;
+        else {
+          const factor = tw.id / (numTimeWindows - 1);
+          heatmapOpacityValue = HEATMAP_MAX_OPACITY - factor * (HEATMAP_MAX_OPACITY - HEATMAP_MIN_OPACITY);
+        }
+        heatmapOpacityValue = Math.max(numTimeWindows > 1 ? HEATMAP_MIN_OPACITY : HEATMAP_MAX_OPACITY, Math.min(heatmapOpacityValue, HEATMAP_MAX_OPACITY));
+        if (numTimeWindows > 1) {
+          if (tw.id === numTimeWindows - 1) heatmapOpacityValue = HEATMAP_MIN_OPACITY;
+          if (tw.id === 0) heatmapOpacityValue = HEATMAP_MAX_OPACITY;
+        }
       }
       if (map.getLayer(heatmapLayerId)) {
-        map.setLayoutProperty(heatmapLayerId, 'visibility', (isSelected && currentDisplayMode === 'heatmap') ? 'visible' : 'none');
-
-        let heatmapOpacity = 0;
-        if (isSelected && currentDisplayMode === 'heatmap') {
-          if (numTimeWindows <= 1) {
-            heatmapOpacity = HEATMAP_MAX_OPACITY;
-          } else {
-            // tw.id is 0 for newest, up to (numTimeWindows - 1) for oldest.
-            // Calculate a factor from 0 (newest) to 1 (oldest).
-            const factor = tw.id / (numTimeWindows - 1);
-            // Interpolate opacity between MAX and MIN.
-            heatmapOpacity = HEATMAP_MAX_OPACITY - factor * (HEATMAP_MAX_OPACITY - HEATMAP_MIN_OPACITY);
-          }
-          // Clamp to ensure opacity is within [MIN_OPACITY, MAX_OPACITY] range,
-          // and also handle cases where MIN_OPACITY might be 0.
-          heatmapOpacity = Math.max(
-            numTimeWindows > 1 ? HEATMAP_MIN_OPACITY : HEATMAP_MAX_OPACITY, // ensure min is respected unless it's the only layer
-            Math.min(heatmapOpacity, HEATMAP_MAX_OPACITY)
-          );
-          if (tw.id === (numTimeWindows - 1) && numTimeWindows > 1) heatmapOpacity = HEATMAP_MIN_OPACITY; // Explicitly set for oldest
-          if (tw.id === 0 && numTimeWindows > 1) heatmapOpacity = HEATMAP_MAX_OPACITY; // Explicitly set for newest
-        }
-        map.setPaintProperty(heatmapLayerId, 'heatmap-opacity', heatmapOpacity);
+        map.setLayoutProperty(heatmapLayerId, 'visibility', heatmapVisibility);
+        map.setPaintProperty(heatmapLayerId, 'heatmap-opacity', heatmapOpacityValue);
       }
     });
   };
@@ -219,26 +295,26 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
     updateLayerVisibility(mapRef.current, displayMode, selectedTimeWindows);
   }, [displayMode, selectedTimeWindows, isMapLoaded]);
 
-  // Data fetching effect
   useEffect(() => {
     if (!isMapLoaded || !mapRef.current || !currentBounds) {
-      setIsLoading(false);
       return;
     }
 
     const map = mapRef.current;
     const activePromises: Promise<void>[] = [];
+    let anyWindowSelectedAndVisible = false;
 
     TIME_WINDOWS.forEach((timeWindow) => {
       const sourceId = `source-${timeWindow.id}`;
+      const isSelected = selectedTimeWindows.has(timeWindow.id);
+      const isLayerVisibleForCurrentMode = (displayMode === 'fill' || displayMode === 'heatmap');
 
-      if (!selectedTimeWindows.has(timeWindow.id)) {
+      if (!isSelected || !isLayerVisibleForCurrentMode) {
         const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
-        if (source && source.setData) {
-          source.setData({ type: 'FeatureCollection', features: [] });
-        }
+        if (source?.setData) source.setData({ type: 'FeatureCollection', features: [] });
         return;
       }
+      anyWindowSelectedAndVisible = true;
 
       const promise = (async () => {
         try {
@@ -250,11 +326,15 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
           params.set('max_lon', currentBounds.getEast().toString());
           params.set('max_lat', currentBounds.getNorth().toString());
 
+          const apiEndpoint = densitySource === 'scaled' && displayMode === 'heatmap'
+            ? '/api/density-scaled'
+            : '/api/density';
 
-          const response = await fetch(`/api/density?${params.toString()}`);
+          const response = await fetch(`${apiEndpoint}?${params.toString()}`);
+
           if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
+            throw new Error(`API Error (${apiEndpoint}): ${response.status} ${response.statusText} - ${errorText}`);
           }
           const data: DensityApiResponse = await response.json();
 
@@ -265,31 +345,29 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
             features = createHeatmapPoints(data);
           }
 
-          const newGeoJson: GeoJSON.FeatureCollection = {
-            type: 'FeatureCollection',
-            features: features,
-          };
-
+          const newGeoJson: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features };
           const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
-          if (source && source.setData) {
+          if (source?.setData) {
             source.setData(newGeoJson);
           }
         } catch (error) {
-          console.error(`Failed to fetch data for TW ${timeWindow.id} (Level ${currentApiLevel}):`, error);
           const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
-          if (source && source.setData) source.setData({ type: 'FeatureCollection', features: [] });
+          if (source?.setData) source.setData({ type: 'FeatureCollection', features: [] });
         }
       })();
       activePromises.push(promise);
     });
 
-    if (activePromises.length > 0) {
+    if (anyWindowSelectedAndVisible && activePromises.length > 0) {
       setIsLoading(true);
-      Promise.all(activePromises).finally(() => setIsLoading(false));
+      Promise.all(activePromises).finally(() => {
+        setIsLoading(false);
+      });
     } else {
       setIsLoading(false);
     }
-  }, [selectedTimeWindows, currentApiLevel, currentBounds, isMapLoaded, displayMode]); // Removed mapRef from dependencies as it's stable
+  }, [selectedTimeWindows, currentApiLevel, currentBounds, isMapLoaded, displayMode, densitySource]);
+
 
   return (
     <div className="map-container-wrapper">

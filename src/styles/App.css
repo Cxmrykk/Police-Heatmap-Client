@@ -1,71 +1,131 @@
+/* src/styles/App.css - Add these or put in a separate controls.css */
+
 .app-container {
   display: flex;
-  flex-direction: column;
+  flex-direction: column; /* Changed from row to column for controls on top */
   height: 100vh;
   width: 100vw;
   overflow: hidden;
 }
 
 .controls-panel {
-  padding: 10px;
-  background-color: #333;
+  padding: 10px 15px;
+  background-color: #282c34; /* Darker background */
   color: white;
   display: flex;
-  gap: 20px;
-  /* Increased gap between control groups */
+  flex-direction: row; /* Arrange control groups in a row */
+  gap: 25px;
   align-items: flex-start;
-  /* Align items to the top */
-  flex-wrap: wrap;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  flex-wrap: wrap; /* Allow wrapping if too many groups */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   z-index: 10;
+  max-height: 40vh; /* Limit height of controls panel */
+  overflow-y: auto; /* Allow scrolling within controls panel if content overflows */
 }
 
-.controls-panel>div {
-  /* Style for each group (Time Windows, Display Mode) */
+.controls-panel > div { /* Each direct child div is a control group */
   display: flex;
   flex-direction: column;
-  /* Stack h3 and labels vertically */
-  gap: 5px;
+  gap: 8px; /* Gap between title and items within a group */
+  min-width: 180px; /* Minimum width for a control group */
 }
 
 .controls-panel h3 {
   margin-top: 0;
-  margin-bottom: 5px;
-  font-size: 0.9em;
-  font-weight: bold;
+  margin-bottom: 8px;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: #61dafb; /* Accent color for titles */
+  border-bottom: 1px solid #444;
+  padding-bottom: 4px;
 }
 
-.controls-panel label.control-item {
-  /* Class for individual labels */
+.controls-panel h4 { /* For sub-titles like "Heatmap Parameters" */
+  margin-top: 5px;
+  margin-bottom: 10px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+
+.control-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   cursor: pointer;
-  font-size: 0.9em;
+  font-size: 0.85em;
 }
 
-.controls-panel input[type="checkbox"],
-.controls-panel input[type="radio"] {
+.control-item input[type="checkbox"],
+.control-item input[type="radio"] {
   cursor: pointer;
-  margin-right: 3px;
+  margin-right: 2px;
+  transform: scale(0.9);
+}
+
+.color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #555;
+  vertical-align: middle;
+}
+
+/* Styles for Heatmap Configuration Panel */
+.heatmap-config-panel {
+  padding: 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #333842;
+  display: flex;
+  flex-direction: column; /* Stack groups vertically */
+  gap: 15px; /* Gap between Radius, Intensity, Opacity groups */
+}
+
+.sliders-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sliders-group h5 {
+    margin: 0 0 5px 0;
+    font-size: 0.8em;
+    color: #aaa;
+    text-transform: uppercase;
+}
+
+.control-slider-item {
+  display: flex;
+  flex-direction: column; /* Label on top of slider */
+  gap: 4px;
+  font-size: 0.8em;
+}
+
+.control-slider-item label {
+  color: #ccc;
+}
+
+.control-slider-item input[type="range"] {
+  width: 100%;
+  cursor: pointer;
 }
 
 .map-container-wrapper {
-  flex-grow: 1;
+  flex-grow: 1; /* Map takes remaining space */
   position: relative;
+  background-color: #1e1e1e; /* Dark background for map area if map doesn't load */
 }
 
 .loading-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  color: white;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 1.5em;
-  z-index: 20;
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6); color: white;
+  display: flex; justify-content: center; align-items: center;
+  font-size: 1.5em; z-index: 20;
+}
+
+.error-message { /* For Mapbox token error */
+  padding: 20px; text-align: center; color: #ff6b6b; font-size: 1.2em;
+  background-color: #2c0000; height: 100vh; display: flex;
+  align-items: center; justify-content: center;
 }

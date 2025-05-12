@@ -1,13 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
 import { LngLatBounds, Map as MapboxMap } from 'mapbox-gl';
 import MapDisplay from './components/MapDisplay';
-import { TIME_WINDOWS, mapboxZoomToApiLevel, MIN_API_LEVEL } from './utils/mapUtils'; // Import MIN_API_LEVEL
-import type { DisplayMode } from './types';
+import { TIME_WINDOWS, mapboxZoomToApiLevel, MIN_API_LEVEL } from './utils/mapUtils';
+import type { DisplayMode, DensitySourceType } from './types';
 import './styles/App.css';
 
 function App() {
   const [selectedTimeWindows, setSelectedTimeWindows] = useState<Set<number>>(() => {
-    // ... (no change)
     const initialSelection = new Set<number>();
     if (TIME_WINDOWS.length > 0) {
       initialSelection.add(TIME_WINDOWS[0].id);
@@ -15,13 +14,13 @@ function App() {
     return initialSelection;
   });
 
-  // Initialize currentApiLevel respecting MIN_API_LEVEL
   const [currentApiLevel, setCurrentApiLevel] = useState<number>(MIN_API_LEVEL);
   const [currentBounds, setCurrentBounds] = useState<LngLatBounds | null>(null);
   const [mapInstance, setMapInstance] = useState<MapboxMap | null>(null);
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('fill');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('heatmap');
+  const [densitySource, setDensitySource] = useState<DensitySourceType>('original');
+  const [heatmapRadiusScale, setHeatmapRadiusScale] = useState<number>(1.0); // New state for radius scale
 
-  // ... handleTimeWindowChange, handleDisplayModeChange (no change) ...
   const handleTimeWindowChange = (id: number) => {
     setSelectedTimeWindows(prev => {
       const newSelection = new Set(prev);
@@ -38,10 +37,17 @@ function App() {
     setDisplayMode(mode);
   };
 
+  const handleDensitySourceChange = (source: DensitySourceType) => {
+    setDensitySource(source);
+  };
+
+  const handleHeatmapRadiusScaleChange = (event: React.ChangeEvent<HTMLInputElement>) => { // New handler
+    setHeatmapRadiusScale(parseFloat(event.target.value));
+  };
+
   const handleMapIdle = useCallback((map: MapboxMap) => {
     setMapInstance(map);
     const newZoom = map.getZoom();
-    // mapboxZoomToApiLevel will now respect MIN_API_LEVEL
     const newApiLevel = mapboxZoomToApiLevel(newZoom);
     const newBounds = map.getBounds();
 
@@ -49,14 +55,14 @@ function App() {
 
     const boundsChanged = (
       !currentBounds ||
-      newBounds.getWest() !== currentBounds.getWest() ||
-      newBounds.getSouth() !== currentBounds.getSouth() ||
-      newBounds.getEast() !== currentBounds.getEast() ||
-      newBounds.getNorth() !== currentBounds.getNorth()
+      Math.abs(newBounds.getWest() - currentBounds.getWest()) > 0.0001 ||
+      Math.abs(newBounds.getSouth() - currentBounds.getSouth()) > 0.0001 ||
+      Math.abs(newBounds.getEast() - currentBounds.getEast()) > 0.0001 ||
+      Math.abs(newBounds.getNorth() - currentBounds.getNorth()) > 0.0001
     );
 
     if (newApiLevel !== currentApiLevel || boundsChanged) {
-      setCurrentApiLevel(newApiLevel); // This will be >= MIN_API_LEVEL
+      setCurrentApiLevel(newApiLevel);
       setCurrentBounds(newBounds);
     }
   }, [currentApiLevel, currentBounds]);
@@ -64,13 +70,11 @@ function App() {
   useEffect(() => {
     if (mapInstance && !currentBounds) {
       const initialZoom = mapInstance.getZoom();
-      // mapboxZoomToApiLevel will ensure it's >= MIN_API_LEVEL
       setCurrentApiLevel(mapboxZoomToApiLevel(initialZoom));
       setCurrentBounds(mapInstance.getBounds());
     }
   }, [mapInstance, currentBounds]);
 
-  // ... (rest of App.tsx, no further changes related to these points) ...
   if (!import.meta.env.VITE_MAPBOX_TOKEN) {
     return (
       <div style={{ padding: '20px', textAlign: 'center', color: 'red', fontSize: '1.2em' }}>
@@ -124,6 +128,44 @@ function App() {
             /> Heatmap
           </label>
         </div>
+        {displayMode === 'heatmap' && (
+          <>
+            <div>
+              <h3>Heatmap Density Source:</h3>
+              <label className="control-item">
+                <input
+                  type="radio"
+                  name="densitySource"
+                  value="original"
+                  checked={densitySource === 'original'}
+                  onChange={() => handleDensitySourceChange('original')}
+                /> Original
+              </label>
+              <label className="control-item">
+                <input
+                  type="radio"
+                  name="densitySource"
+                  value="scaled"
+                  checked={densitySource === 'scaled'}
+                  onChange={() => handleDensitySourceChange('scaled')}
+                /> Scaled
+              </label>
+            </div>
+            {/* New Control for Heatmap Radius Scale */}
+            <div>
+              <h3>Heatmap Radius Scale: ({heatmapRadiusScale.toFixed(1)}x)</h3>
+              <input
+                type="range"
+                min="0.2"
+                max="3.0"
+                step="0.1"
+                value={heatmapRadiusScale}
+                onChange={handleHeatmapRadiusScaleChange}
+                style={{ width: '100px' }}
+              />
+            </div>
+          </>
+        )}
       </div>
       <MapDisplay
         selectedTimeWindows={selectedTimeWindows}
@@ -131,6 +173,8 @@ function App() {
         currentApiLevel={currentApiLevel}
         currentBounds={currentBounds}
         displayMode={displayMode}
+        densitySource={densitySource}
+        heatmapRadiusScale={heatmapRadiusScale} // Pass the new state
       />
     </div>
   );

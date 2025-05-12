@@ -9,7 +9,9 @@ export type DensityApiResponse = DensityPoint[];
 export interface TimeWindow {
   id: number;
   name: string;
-  color: string; // This color will be used for fill, heatmap might use a gradient
+  color: string;
 }
 
-export type DisplayMode = 'fill' | 'heatmap'; // New type
+export type DisplayMode = 'fill' | 'heatmap';
+
+export type DensitySourceType = 'original' | 'scaled'; // New type
