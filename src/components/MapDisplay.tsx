@@ -39,7 +39,8 @@ interface MapDisplayProps {
   selectedRadiusGroupId: number;
   heatmapRadiusScale: number;
   heatmapOpacity: number;
-  diversityHeatmapRenderMode: DiversityHeatmapRenderMode; // New prop
+  diversityHeatmapRenderMode: DiversityHeatmapRenderMode;
+  initialCenter?: [number, number];
 }
 
 const MapDisplay: React.FC<MapDisplayProps> = ({
@@ -53,7 +54,8 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
   selectedRadiusGroupId,
   heatmapRadiusScale,
   heatmapOpacity,
-  diversityHeatmapRenderMode, // Destructure new prop
+  diversityHeatmapRenderMode,
+  initialCenter,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -90,7 +92,12 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
   useEffect(() => {
     if (!MAPBOX_TOKEN || mapRef.current || !mapContainerRef.current) return;
     mapboxgl.accessToken = MAPBOX_TOKEN;
-    const map = new Map({ container: mapContainerRef.current, style: 'mapbox://styles/mapbox/dark-v11', center: [-98.5795, 39.8283], zoom: 3 });
+    const map = new Map({
+      container: mapContainerRef.current,
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: initialCenter || [-98.5795, 39.8283],
+      zoom: initialCenter ? 4 : 3, // Adjusted zoom: 4 if centered, 3 otherwise (continent view)
+    });
     mapRef.current = map;
     map.on('error', errHandler);
 
@@ -98,7 +105,7 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
       setIsMapLoaded(true);
       onMapIdleRef.current(map);
 
-      // Density layers (per time window) - no change
+      // Density layers (per time window)
       [...TIME_WINDOWS].reverse().forEach(tw => {
         const sourceId = `source-density-${tw.id}`;
         if (!map.getSource(sourceId)) {
@@ -124,7 +131,7 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
         map.addSource('source-diversity', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       }
 
-      // Diversity Fill Layers (per-score, always needed for fill mode)
+      // Diversity Fill Layers (per-score)
       DIVERSITY_SCORE_INFO.forEach(dsi => {
         const score = dsi.score;
         const color = dsi.color;
@@ -138,7 +145,7 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
         }
       });
 
-      // Diversity Heatmap Layer (Stacked - for original behavior)
+      // Diversity Heatmap Layer (Stacked)
       const stackedHeatmapLayerId = 'heatmap-layer-diversity-stacked';
       if (!map.getLayer(stackedHeatmapLayerId)) {
         map.addLayer({
@@ -155,11 +162,10 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
             ],
             'heatmap-radius': 10, 'heatmap-opacity': 0,
           }, layout: { visibility: 'none' }
-          // Initial filter can be ['boolean', false] or applied in the effect
         });
       }
 
-      // Diversity Heatmap Layers (Per-Score - for new behavior)
+      // Diversity Heatmap Layers (Per-Score)
       DIVERSITY_SCORE_INFO.forEach(dsi => {
         const score = dsi.score;
         const color = dsi.color;
@@ -208,7 +214,7 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
       }
       mapRef.current = null; setIsMapLoaded(false);
     };
-  }, []);
+  }, [initialCenter]);
 
   // Effect for updating layer visibility and paint properties
   useEffect(() => {

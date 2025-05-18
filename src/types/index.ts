@@ -30,3 +30,11 @@ export interface GeoJsonProperties {
   density?: number; // Make optional as one will always be present
   score?: number;   // Make optional
 }
+
+// New type for application metadata
+export interface AppMetadata {
+  last_grid_update_timestamp?: string;
+  center_longitude?: string;
+  center_latitude?: string;
+  total_alerts_in_time_windows?: string;
+}

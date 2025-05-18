@@ -177,3 +177,29 @@
   align-items: center;
   justify-content: center;
 }
+
+/* Metadata Overlay Styles */
+.metadata-overlay {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background-color: rgba(30, 30, 30, 0.85);
+  /* Darker, slightly more opaque */
+  color: #e0e0e0;
+  /* Lighter text color for better contrast */
+  padding: 10px 15px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  /* Slightly smaller font */
+  z-index: 1000;
+  /* Ensure it's above the map */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  /* Softer shadow */
+  max-width: 300px;
+  /* Prevent it from being too wide */
+}
+
+.metadata-overlay p {
+  margin: 4px 0;
+  line-height: 1.4;
+}

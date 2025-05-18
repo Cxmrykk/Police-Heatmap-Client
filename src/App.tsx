@@ -1,9 +1,8 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react'; // Added useMemo
 import { LngLatBounds, Map as MapboxMap } from 'mapbox-gl';
 import MapDisplay from './components/MapDisplay';
-// Import MAX_API_LEVEL
 import { TIME_WINDOWS, DIVERSITY_RADIUS_OPTIONS, DIVERSITY_SCORE_INFO, mapboxZoomToApiLevel, MIN_API_LEVEL, MAX_API_LEVEL } from './utils/mapUtils';
-import type { DisplayMode, DataSourceType, DiversityHeatmapRenderMode } from './types';
+import type { DisplayMode, DataSourceType, DiversityHeatmapRenderMode, AppMetadata } from './types';
 import './styles/App.css';
 
 const DEFAULT_HEATMAP_OPACITY = 0.85;
@@ -21,12 +20,10 @@ function App() {
     new Set(DIVERSITY_SCORE_INFO.map(dsi => dsi.score))
   );
 
-  // API Level and Bounds state
-  const [currentApiLevel, setCurrentApiLevel] = useState<number>(MIN_API_LEVEL); // Effective API level for fetching
+  const [currentApiLevel, setCurrentApiLevel] = useState<number>(MIN_API_LEVEL);
   const [currentBounds, setCurrentBounds] = useState<LngLatBounds | null>(null);
   const [mapInstance, setMapInstance] = useState<MapboxMap | null>(null);
 
-  // UI Control States
   const [displayMode, setDisplayMode] = useState<DisplayMode>('heatmap');
   const [dataSource, setDataSource] = useState<DataSourceType>('density');
   const [selectedRadiusGroupId, setSelectedRadiusGroupId] = useState<number>(0);
@@ -34,11 +31,33 @@ function App() {
   const [heatmapOpacity, setHeatmapOpacity] = useState<number>(DEFAULT_HEATMAP_OPACITY);
   const [diversityHeatmapMode, setDiversityHeatmapMode] = useState<DiversityHeatmapRenderMode>('stacked');
 
-  // New states for manual precision
   const [manualPrecisionEnabled, setManualPrecisionEnabled] = useState<boolean>(false);
-  const [manualPrecisionLevel, setManualPrecisionLevel] = useState<number>(MIN_API_LEVEL); // Default manual level
-  const [autoCalculatedApiLevel, setAutoCalculatedApiLevel] = useState<number>(MIN_API_LEVEL); // API level from zoom
+  const [manualPrecisionLevel, setManualPrecisionLevel] = useState<number>(MIN_API_LEVEL);
+  const [autoCalculatedApiLevel, setAutoCalculatedApiLevel] = useState<number>(MIN_API_LEVEL);
 
+  const [appMetadata, setAppMetadata] = useState<AppMetadata | null>(null);
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const response = await fetch('/api/metadata');
+        if (!response.ok) {
+          if (response.status === 404) {
+            console.warn("Metadata not found (404). Grid update might be pending.");
+            setAppMetadata({});
+            return;
+          }
+          throw new Error(`API Error (metadata): ${response.status} ${await response.text()}`);
+        }
+        const data: AppMetadata = await response.json();
+        setAppMetadata(data);
+      } catch (error) {
+        console.error("Failed to fetch app metadata:", error);
+        setAppMetadata({});
+      }
+    };
+    fetchMetadata();
+  }, []);
 
   const handleTimeWindowChange = (id: number) => {
     setSelectedTimeWindows(prev => {
@@ -75,11 +94,9 @@ function App() {
     setDiversityHeatmapMode(mode);
   };
 
-  // New handlers for manual precision
   const handleManualPrecisionToggle = () => {
     const nextEnabledState = !manualPrecisionEnabled;
     if (nextEnabledState) {
-      // Switching TO manual: set manual level to current auto level for smooth transition
       setManualPrecisionLevel(autoCalculatedApiLevel);
     }
     setManualPrecisionEnabled(nextEnabledState);
@@ -89,7 +106,6 @@ function App() {
     setManualPrecisionLevel(parseInt(event.target.value, 10));
   };
 
-  // Effect to determine the effective currentApiLevel based on mode and selections
   useEffect(() => {
     const newEffectiveApiLevel = manualPrecisionEnabled ? manualPrecisionLevel : autoCalculatedApiLevel;
     if (newEffectiveApiLevel !== currentApiLevel) {
@@ -122,7 +138,6 @@ function App() {
     }
   }, [autoCalculatedApiLevel, currentBounds]);
 
-  // Effect to set initial autoCalculatedApiLevel and currentBounds once map is loaded
   useEffect(() => {
     if (mapInstance && !currentBounds) {
       const initialZoom = mapInstance.getZoom();
@@ -135,6 +150,15 @@ function App() {
   if (!import.meta.env.VITE_MAPBOX_TOKEN) {
     return <div className="error-message">Error: Mapbox token (VITE_MAPBOX_TOKEN) is not configured.</div>;
   }
+
+  // Memoize initialMapCenter to prevent unnecessary re-renders of MapDisplay
+  const initialMapCenter = useMemo<[number, number] | undefined>(() => {
+    if (appMetadata?.center_longitude && appMetadata?.center_latitude) {
+      return [parseFloat(appMetadata.center_longitude), parseFloat(appMetadata.center_latitude)];
+    }
+    return undefined;
+  }, [appMetadata?.center_longitude, appMetadata?.center_latitude]);
+
 
   return (
     <div className="app-container">
@@ -180,7 +204,6 @@ function App() {
           </div>
         )}
 
-        {/* New Precision Control Group */}
         <div>
           <h3>Precision Level (L{currentApiLevel}):</h3>
           <label className="control-item">
@@ -248,7 +271,18 @@ function App() {
         heatmapRadiusScale={heatmapRadiusScale}
         heatmapOpacity={heatmapOpacity}
         diversityHeatmapRenderMode={diversityHeatmapMode}
+        initialCenter={initialMapCenter}
       />
+      {appMetadata && (Object.keys(appMetadata).length > 0 || appMetadata === null) && (
+        <div className="metadata-overlay">
+          {appMetadata.last_grid_update_timestamp ? (
+            <p>Last Grid Update: {new Date(parseInt(appMetadata.last_grid_update_timestamp, 10)).toLocaleString()}</p>
+          ) : appMetadata === null ? <p>Loading metadata...</p> : <p>Grid update time not available.</p>}
+          {appMetadata.total_alerts_in_time_windows ? (
+            <p>Total Alerts (in time windows): {appMetadata.total_alerts_in_time_windows}</p>
+          ) : appMetadata !== null && <p>Total alerts data not available.</p>}
+        </div>
+      )}
     </div>
   );
 }
