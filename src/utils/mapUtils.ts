@@ -1,8 +1,9 @@
+// src/utils/mapUtils.ts
 import { LngLatBounds } from 'mapbox-gl';
 import type { DensityDataPoint, DiversityDataPoint, TimeWindow, DataSourceType, GeoJsonProperties } from '../types';
 
 export const MAX_API_LEVEL = 5;
-export const MIN_API_LEVEL = 1;
+export const MIN_API_LEVEL = 0; // Updated to match backend (0-5)
 
 export const TIME_WINDOWS: TimeWindow[] = [
   { id: 0, name: "Last 7 days", color: "#FF0000" }, // Red
@@ -20,14 +21,12 @@ export const DIVERSITY_RADIUS_OPTIONS = [
 ];
 export const NUM_DIVERSITY_RADIUS_GROUPS = DIVERSITY_RADIUS_OPTIONS.length;
 
-// Define colors and names for diversity scores
-// Max score is TIME_WINDOWS.length. User wants: 4=Red, 3=Yellow, 2=Green, 1=Blue
 export const DIVERSITY_SCORE_INFO = TIME_WINDOWS.length >= 4 ? [
   { score: 1, name: "Score 1 (Lowest Diversity)", color: "#0000FF" }, // Blue
   { score: 2, name: "Score 2", color: "#00FF00" }, // Green
   { score: 3, name: "Score 3", color: "#FFFF00" }, // Yellow
   { score: 4, name: "Score 4 (Highest Diversity)", color: "#FF0000" }, // Red
-] : [ // Fallback if fewer than 4 time windows, adjust as needed
+] : [
   { score: 1, name: "Score 1", color: "#0000FF" },
   { score: 2, name: "Score 2", color: "#00FF00" },
   { score: 3, name: "Score 3", color: "#FFFF00" },
@@ -36,14 +35,16 @@ export const DIVERSITY_SCORE_INFO = TIME_WINDOWS.length >= 4 ? [
 
 export function mapboxZoomToApiLevel(mapboxZoom: number): number {
   let level: number;
-  if (mapboxZoom < 4) level = 1;
-  else if (mapboxZoom < 7) level = 1;
-  else if (mapboxZoom < 10) level = 2;
-  else if (mapboxZoom < 13) level = 3;
-  else if (mapboxZoom < 16) level = 4;
-  else level = MAX_API_LEVEL;
+  // Adjusted zoom-to-level mapping to allow level 0
+  if (mapboxZoom < 5) level = 0;       // Zoom < 5: Level 0
+  else if (mapboxZoom < 8) level = 1;  // Zoom 5-7.99: Level 1
+  else if (mapboxZoom < 11) level = 2; // Zoom 8-10.99: Level 2
+  else if (mapboxZoom < 14) level = 3; // Zoom 11-13.99: Level 3
+  else if (mapboxZoom < 17) level = 4; // Zoom 14-16.99: Level 4
+  else level = MAX_API_LEVEL;          // Zoom >= 17: Level 5
 
-  return Math.max(MIN_API_LEVEL, level);
+  // Ensure the level is within the defined MIN/MAX API_LEVEL bounds
+  return Math.max(MIN_API_LEVEL, Math.min(level, MAX_API_LEVEL));
 }
 
 export function calculateCellPolygon(
@@ -51,6 +52,7 @@ export function calculateCellPolygon(
   apiLevel: number
 ): GeoJSON.Feature<GeoJSON.Polygon, GeoJsonProperties> {
   const { lon, lat } = point;
+  // Ensure apiLevel used for calculation is at least MIN_API_LEVEL (0)
   const effectiveApiLevel = Math.max(MIN_API_LEVEL, apiLevel);
   const halfDelta = (1 / Math.pow(10, effectiveApiLevel)) / 2;
 
@@ -96,9 +98,8 @@ export function createHeatmapPoints(
 
 export function getMapboxOpacityExpression(dataSource: DataSourceType): mapboxgl.Expression {
   const propertyName = dataSource === 'density' ? 'density' : 'score';
-  const maxValue = dataSource === 'density' ? 255 : TIME_WINDOWS.length; // Max score is number of time windows
+  const maxValue = dataSource === 'density' ? 255 : TIME_WINDOWS.length;
 
-  // Normalize value to 0-1 range, then scale for opacity (0.3 to 1.0)
   return ['+', 0.3, ['*', ['/', ['get', propertyName], maxValue], 0.7]];
 }
 
