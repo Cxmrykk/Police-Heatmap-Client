@@ -1,372 +1,373 @@
 import React, { useEffect, useRef, useState } from 'react';
-// Corrected imports for Mapbox GL types
-import mapboxgl, {
-  LngLatBounds,
-  Map,
-  ErrorEvent // Specifically for the 'error' event
-  // MapboxEvent removed as it's deprecated
-} from 'mapbox-gl';
-import type { DensityApiResponse, DisplayMode, DensitySourceType } from '../types';
+import mapboxgl, { LngLatBounds, Map, ErrorEvent, GeoJSONSource, type ExpressionSpecification } from 'mapbox-gl';
+// Import the new type from types
+import type { ApiDensityResponse, ApiDiversityResponse, DisplayMode, DataSourceType, DiversityHeatmapRenderMode } from '../types';
 import {
   debounce,
   calculateCellPolygon,
   createHeatmapPoints,
   getMapboxOpacityExpression,
   TIME_WINDOWS,
+  DIVERSITY_SCORE_INFO,
 } from '../utils/mapUtils';
 import '../styles/MapDisplay.css';
-import type { ExpressionSpecification } from 'mapbox-gl';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
-// ... (rest of the constants and interface remain the same) ...
-const HEATMAP_MAX_OPACITY = 0.85;
-const HEATMAP_MIN_OPACITY = 0.40;
+const HEATMAP_RELATIVE_MAX_OPACITY = 0.85;
+const HEATMAP_RELATIVE_MIN_OPACITY = 0.40;
 
-const BASE_RADIUS_ZOOM_STOPS: Record<number, number> = {
-  3: 10,
-  7: 15,
-  9: 20,
-  12: 25,
-  15: 20,
-  18: 15,
+const BASE_RADIUS_ZOOM_STOPS: Record<number, number> = { 3: 10, 7: 15, 9: 20, 12: 25, 15: 20, 18: 15 };
+const DENSITY_VALUE_TO_RADIUS_MULTIPLIER_STOPS: Array<[number, number]> = [[0, 0.6], [50, 0.8], [150, 1.0], [255, 1.5]];
+const SCORE_VALUE_TO_RADIUS_MULTIPLIER_STOPS: Array<[number, number]> = [
+  [0, 0.6], [1, 0.8], [Math.ceil(TIME_WINDOWS.length / 2), 1.0], [TIME_WINDOWS.length, 1.5],
+];
+
+const errHandler = (e: ErrorEvent) => {
+  console.error('Mapbox GL Error:', e.error?.message || e.error, e); // Log the full event for more details
 };
 
-const DENSITY_TO_RADIUS_MULTIPLIER_STOPS: Array<[number, number]> = [
-  [0, 0.6],
-  [50, 0.8],
-  [150, 1.0],
-  [255, 1.5],
-];
 
 interface MapDisplayProps {
   selectedTimeWindows: Set<number>;
+  selectedDiversityScores: Set<number>;
   onMapIdle: (map: Map) => void;
   currentApiLevel: number;
   currentBounds: LngLatBounds | null;
   displayMode: DisplayMode;
-  densitySource: DensitySourceType;
+  dataSource: DataSourceType;
+  selectedRadiusGroupId: number;
   heatmapRadiusScale: number;
+  heatmapOpacity: number;
+  diversityHeatmapRenderMode: DiversityHeatmapRenderMode; // New prop
 }
-
 
 const MapDisplay: React.FC<MapDisplayProps> = ({
   selectedTimeWindows,
+  selectedDiversityScores,
   onMapIdle,
   currentApiLevel,
   currentBounds,
   displayMode,
-  densitySource,
+  dataSource,
+  selectedRadiusGroupId,
   heatmapRadiusScale,
+  heatmapOpacity,
+  diversityHeatmapRenderMode, // Destructure new prop
 }) => {
-  // ... (refs and state remain the same) ...
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isMapLoaded, setIsMapLoaded] = useState<boolean>(false);
 
   const heatmapRadiusScaleRef = useRef(heatmapRadiusScale);
-  useEffect(() => {
-    heatmapRadiusScaleRef.current = heatmapRadiusScale;
-  }, [heatmapRadiusScale]);
+  useEffect(() => { heatmapRadiusScaleRef.current = heatmapRadiusScale; }, [heatmapRadiusScale]);
+
+  const heatmapOpacityRef = useRef(heatmapOpacity);
+  useEffect(() => { heatmapOpacityRef.current = heatmapOpacity; }, [heatmapOpacity]);
 
   const onMapIdleRef = useRef(onMapIdle);
-  useEffect(() => {
-    onMapIdleRef.current = onMapIdle;
-  }, [onMapIdle]);
+  useEffect(() => { onMapIdleRef.current = onMapIdle; }, [onMapIdle]);
 
   const hexToRgb = (hex: string): string => {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '0,0,0';
   };
 
-  const getHeatmapRadiusExpression = (ageBasedRadiusMultiplier: number): ExpressionSpecification => {
-    const densityRadiusMultiplierExpression: ExpressionSpecification = [
-      'interpolate',
-      ['linear'],
-      ['get', 'density'],
-    ];
-    DENSITY_TO_RADIUS_MULTIPLIER_STOPS.forEach(([density, multiplier]) => {
-      densityRadiusMultiplierExpression.push(density, multiplier);
-    });
-
+  const getHeatmapRadiusExpression = (ageBasedRadiusMultiplier: number, currentDataSource: DataSourceType): ExpressionSpecification => {
+    const propertyName = currentDataSource === 'density' ? 'density' : 'score';
+    const valueToRadiusStops = currentDataSource === 'density' ? DENSITY_VALUE_TO_RADIUS_MULTIPLIER_STOPS : SCORE_VALUE_TO_RADIUS_MULTIPLIER_STOPS;
+    const valueRadiusMultiplierExpression: ExpressionSpecification = ['interpolate', ['linear'], ['get', propertyName]];
+    valueToRadiusStops.forEach(([value, multiplier]) => valueRadiusMultiplierExpression.push(value, multiplier));
     const radiusExpression: ExpressionSpecification = ['interpolate', ['linear'], ['zoom']];
-
     Object.entries(BASE_RADIUS_ZOOM_STOPS).forEach(([zoomStr, baseRadiusAtZoom]) => {
-      const zoom = parseFloat(zoomStr);
-      radiusExpression.push(
-        zoom,
-        [
-          '*',
-          heatmapRadiusScaleRef.current,
-          ageBasedRadiusMultiplier,
-          baseRadiusAtZoom,
-          densityRadiusMultiplierExpression
-        ]
-      );
+      radiusExpression.push(parseFloat(zoomStr), ['*', heatmapRadiusScaleRef.current, ageBasedRadiusMultiplier, baseRadiusAtZoom, valueRadiusMultiplierExpression]);
     });
     return radiusExpression;
   };
 
+  // Initial map setup
   useEffect(() => {
-    if (!MAPBOX_TOKEN) {
-      console.error("MapDisplay: Mapbox token is not set. Cannot initialize map.");
-      return;
-    }
-    if (mapRef.current || !mapContainerRef.current) {
-      return;
-    }
-
+    if (!MAPBOX_TOKEN || mapRef.current || !mapContainerRef.current) return;
     mapboxgl.accessToken = MAPBOX_TOKEN;
-    const map = new Map({
-      container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
-      center: [-98.5795, 39.8283],
-      zoom: 3,
-    });
+    const map = new Map({ container: mapContainerRef.current, style: 'mapbox://styles/mapbox/dark-v11', center: [-98.5795, 39.8283], zoom: 3 });
     mapRef.current = map;
-
-    // Correctly typed error handler using ErrorEvent
-    const mapErrorHandler = (e: ErrorEvent) => {
-      // ErrorEvent is guaranteed to have an 'error' property
-      console.error('Mapbox GL Error:', e.error?.message || e.error);
-    };
-    map.on('error', mapErrorHandler);
-
+    map.on('error', errHandler);
 
     const handleLoad = () => {
       setIsMapLoaded(true);
       onMapIdleRef.current(map);
 
-      const timeWindowsForLayering = [...TIME_WINDOWS].reverse();
-
-      timeWindowsForLayering.forEach(tw => {
-        const sourceId = `source-${tw.id}`;
+      // Density layers (per time window) - no change
+      [...TIME_WINDOWS].reverse().forEach(tw => {
+        const sourceId = `source-density-${tw.id}`;
         if (!map.getSource(sourceId)) {
-          map.addSource(sourceId, {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-          });
+          map.addSource(sourceId, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
         }
-
-        const fillLayerId = `fill-layer-${tw.id}`;
-        if (!map.getLayer(fillLayerId)) {
-          map.addLayer({
-            id: fillLayerId,
-            type: 'fill',
-            source: sourceId,
-            paint: {
-              'fill-color': tw.color,
-              'fill-opacity': getMapboxOpacityExpression(),
-              'fill-outline-color': 'rgba(0,0,0,0.1)',
-            },
-            layout: { visibility: 'none' }
-          });
+        if (!map.getLayer(`fill-layer-density-${tw.id}`)) {
+          map.addLayer({ id: `fill-layer-density-${tw.id}`, type: 'fill', source: sourceId, paint: { 'fill-color': tw.color, 'fill-opacity': 0, 'fill-outline-color': 'rgba(0,0,0,0.1)' }, layout: { visibility: 'none' } });
         }
-
-        const heatmapLayerId = `heatmap-layer-${tw.id}`;
-        if (!map.getLayer(heatmapLayerId)) {
-          const numTimeWindows = TIME_WINDOWS.length;
-          const ageFactor = numTimeWindows > 1 ? tw.id / (numTimeWindows - 1) : 0;
-          const ageBasedRadiusMultiplier = 0.7 + ageFactor * 0.6;
-          const intensityMultiplier = 1.2 - ageFactor * 0.4;
-          const radiusExpr = getHeatmapRadiusExpression(ageBasedRadiusMultiplier);
-
+        if (!map.getLayer(`heatmap-layer-density-${tw.id}`)) {
           map.addLayer({
-            id: heatmapLayerId,
-            type: 'heatmap',
-            source: sourceId,
-            maxzoom: 20,
+            id: `heatmap-layer-density-${tw.id}`, type: 'heatmap', source: sourceId, maxzoom: 20,
             paint: {
-              'heatmap-weight': [
-                'interpolate', ['linear'], ['get', 'density'],
-                0, 0, 1, 0.01, 255, 1
-              ],
-              'heatmap-intensity': [
-                'interpolate', ['linear'], ['zoom'],
-                3, Math.max(0.1, 1 * intensityMultiplier),
-                7, Math.max(0.1, 1.5 * intensityMultiplier),
-                9, Math.max(0.2, 2 * intensityMultiplier),
-                12, Math.max(0.3, 3 * intensityMultiplier),
-                15, Math.max(0.5, 5 * intensityMultiplier),
-                18, Math.max(0.8, 8 * intensityMultiplier)
-              ],
-              'heatmap-color': [
-                'interpolate', ['linear'], ['heatmap-density'],
-                0, 'rgba(0,0,0,0)',
-                0.05, `rgba(${hexToRgb(tw.color)}, 0.05)`,
-                0.2, `rgba(${hexToRgb(tw.color)}, 0.2)`,
-                0.4, `rgba(${hexToRgb(tw.color)}, 0.4)`,
-                0.6, `rgba(${hexToRgb(tw.color)}, 0.6)`,
-                0.8, `rgba(${hexToRgb(tw.color)}, 0.8)`,
-                1, `rgba(${hexToRgb(tw.color)}, 1)`
-              ],
-              'heatmap-radius': radiusExpr,
-              'heatmap-opacity': 0,
-            }
+              'heatmap-weight': 1, 'heatmap-intensity': 1,
+              'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.05, `rgba(${hexToRgb(tw.color)},0.05)`, 0.2, `rgba(${hexToRgb(tw.color)},0.2)`, 0.4, `rgba(${hexToRgb(tw.color)},0.4)`, 0.6, `rgba(${hexToRgb(tw.color)},0.6)`, 0.8, `rgba(${hexToRgb(tw.color)},0.8)`, 1, `rgba(${hexToRgb(tw.color)},1)`],
+              'heatmap-radius': 10, 'heatmap-opacity': 0,
+            }, layout: { visibility: 'none' }
           });
         }
       });
-      updateLayerVisibility(map, displayMode, selectedTimeWindows);
+
+      // Single source for all diversity data
+      if (!map.getSource('source-diversity')) {
+        map.addSource('source-diversity', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      }
+
+      // Diversity Fill Layers (per-score, always needed for fill mode)
+      DIVERSITY_SCORE_INFO.forEach(dsi => {
+        const score = dsi.score;
+        const color = dsi.color;
+        const fillLayerId = `fill-layer-diversity-${score}`;
+        if (!map.getLayer(fillLayerId)) {
+          map.addLayer({
+            id: fillLayerId, type: 'fill', source: 'source-diversity',
+            paint: { 'fill-color': color, 'fill-opacity': 0, 'fill-outline-color': 'rgba(0,0,0,0.1)' },
+            layout: { visibility: 'none' }, filter: ['==', ['get', 'score'], score]
+          });
+        }
+      });
+
+      // Diversity Heatmap Layer (Stacked - for original behavior)
+      const stackedHeatmapLayerId = 'heatmap-layer-diversity-stacked';
+      if (!map.getLayer(stackedHeatmapLayerId)) {
+        map.addLayer({
+          id: stackedHeatmapLayerId, type: 'heatmap', source: 'source-diversity', maxzoom: 20,
+          paint: {
+            'heatmap-weight': ['interpolate', ['linear'], ['get', 'score'], 0, 0, 1, 0.25, 2, 0.5, 3, 0.75, TIME_WINDOWS.length, 1],
+            'heatmap-intensity': 1,
+            'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
+              0, 'rgba(0,0,0,0)',
+              0.25, DIVERSITY_SCORE_INFO.find(s => s.score === 1)?.color || '#0000FF',
+              0.5, DIVERSITY_SCORE_INFO.find(s => s.score === 2)?.color || '#00FF00',
+              0.75, DIVERSITY_SCORE_INFO.find(s => s.score === 3)?.color || '#FFFF00',
+              1, DIVERSITY_SCORE_INFO.find(s => s.score === 4)?.color || '#FF0000'
+            ],
+            'heatmap-radius': 10, 'heatmap-opacity': 0,
+          }, layout: { visibility: 'none' }
+          // Initial filter can be ['boolean', false] or applied in the effect
+        });
+      }
+
+      // Diversity Heatmap Layers (Per-Score - for new behavior)
+      DIVERSITY_SCORE_INFO.forEach(dsi => {
+        const score = dsi.score;
+        const color = dsi.color;
+        const perScoreHeatmapLayerId = `heatmap-layer-diversity-per-score-${score}`;
+        if (!map.getLayer(perScoreHeatmapLayerId)) {
+          map.addLayer({
+            id: perScoreHeatmapLayerId, type: 'heatmap', source: 'source-diversity', maxzoom: 20,
+            paint: {
+              'heatmap-weight': 1,
+              'heatmap-intensity': 1,
+              'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
+                0, 'rgba(0,0,0,0)',
+                0.1, `rgba(${hexToRgb(color)},0.1)`, 0.3, `rgba(${hexToRgb(color)},0.3)`,
+                0.5, `rgba(${hexToRgb(color)},0.5)`, 0.7, `rgba(${hexToRgb(color)},0.7)`,
+                1, `rgba(${hexToRgb(color)},1)`
+              ],
+              'heatmap-radius': 10, 'heatmap-opacity': 0,
+            },
+            layout: { visibility: 'none' }, filter: ['==', ['get', 'score'], score]
+          });
+        }
+      });
     };
 
-    const debouncedMapIdleHandler = debounce(() => {
-      if (mapRef.current) onMapIdleRef.current(mapRef.current);
-    }, 500);
-
+    const debouncedMapIdleHandler = debounce(() => { if (mapRef.current) onMapIdleRef.current(mapRef.current); }, 500);
     map.on('load', handleLoad);
     map.on('moveend', debouncedMapIdleHandler);
     map.on('zoomend', debouncedMapIdleHandler);
 
     return () => {
-      map.off('load', handleLoad);
-      map.off('moveend', debouncedMapIdleHandler);
-      map.off('zoomend', debouncedMapIdleHandler);
-      map.off('error', mapErrorHandler);
-      if (mapRef.current) mapRef.current.remove();
-      mapRef.current = null;
-      setIsMapLoaded(false);
+      map.off('load', handleLoad); map.off('moveend', debouncedMapIdleHandler); map.off('zoomend', debouncedMapIdleHandler); map.off('error', errHandler);
+      if (mapRef.current) {
+        const currentMap = mapRef.current;
+        TIME_WINDOWS.forEach(tw => {
+          if (currentMap.getLayer(`fill-layer-density-${tw.id}`)) currentMap.removeLayer(`fill-layer-density-${tw.id}`);
+          if (currentMap.getLayer(`heatmap-layer-density-${tw.id}`)) currentMap.removeLayer(`heatmap-layer-density-${tw.id}`);
+          if (currentMap.getSource(`source-density-${tw.id}`)) currentMap.removeSource(`source-density-${tw.id}`);
+        });
+        DIVERSITY_SCORE_INFO.forEach(dsi => {
+          if (currentMap.getLayer(`fill-layer-diversity-${dsi.score}`)) currentMap.removeLayer(`fill-layer-diversity-${dsi.score}`);
+          if (currentMap.getLayer(`heatmap-layer-diversity-per-score-${dsi.score}`)) currentMap.removeLayer(`heatmap-layer-diversity-per-score-${dsi.score}`);
+        });
+        if (currentMap.getLayer('heatmap-layer-diversity-stacked')) currentMap.removeLayer('heatmap-layer-diversity-stacked');
+        if (currentMap.getSource('source-diversity')) currentMap.removeSource('source-diversity');
+        currentMap.remove();
+      }
+      mapRef.current = null; setIsMapLoaded(false);
     };
   }, []);
 
-  // ... (rest of the useEffects and updateLayerVisibility function remain the same) ...
-  useEffect(() => {
-    if (!isMapLoaded || !mapRef.current || displayMode !== 'heatmap') {
-      return;
-    }
-    const map = mapRef.current;
-
-    TIME_WINDOWS.forEach(tw => {
-      const heatmapLayerId = `heatmap-layer-${tw.id}`;
-      if (map.getLayer(heatmapLayerId)) {
-        const numTimeWindows = TIME_WINDOWS.length;
-        const ageFactor = numTimeWindows > 1 ? tw.id / (numTimeWindows - 1) : 0;
-        const ageBasedRadiusMultiplier = 0.7 + ageFactor * 0.6;
-        const newRadiusExpr = getHeatmapRadiusExpression(ageBasedRadiusMultiplier);
-        map.setPaintProperty(heatmapLayerId, 'heatmap-radius', newRadiusExpr);
-      }
-    });
-  }, [heatmapRadiusScale, isMapLoaded, displayMode]);
-
-
-  const updateLayerVisibility = (
-    map: Map,
-    currentDisplayMode: DisplayMode,
-    currentSelectedTimeWindows: Set<number>
-  ) => {
-    const numTimeWindows = TIME_WINDOWS.length;
-    TIME_WINDOWS.forEach(tw => {
-      const fillLayerId = `fill-layer-${tw.id}`;
-      const heatmapLayerId = `heatmap-layer-${tw.id}`;
-      const isSelected = currentSelectedTimeWindows.has(tw.id);
-
-      let fillVisibility: 'visible' | 'none' = 'none';
-      if (isSelected && currentDisplayMode === 'fill') {
-        fillVisibility = 'visible';
-      }
-      if (map.getLayer(fillLayerId)) {
-        map.setLayoutProperty(fillLayerId, 'visibility', fillVisibility);
-      }
-
-      let heatmapVisibility: 'visible' | 'none' = 'none';
-      let heatmapOpacityValue = 0;
-      if (isSelected && currentDisplayMode === 'heatmap') {
-        heatmapVisibility = 'visible';
-        if (numTimeWindows <= 1) heatmapOpacityValue = HEATMAP_MAX_OPACITY;
-        else {
-          const factor = tw.id / (numTimeWindows - 1);
-          heatmapOpacityValue = HEATMAP_MAX_OPACITY - factor * (HEATMAP_MAX_OPACITY - HEATMAP_MIN_OPACITY);
-        }
-        heatmapOpacityValue = Math.max(numTimeWindows > 1 ? HEATMAP_MIN_OPACITY : HEATMAP_MAX_OPACITY, Math.min(heatmapOpacityValue, HEATMAP_MAX_OPACITY));
-        if (numTimeWindows > 1) {
-          if (tw.id === numTimeWindows - 1) heatmapOpacityValue = HEATMAP_MIN_OPACITY;
-          if (tw.id === 0) heatmapOpacityValue = HEATMAP_MAX_OPACITY;
-        }
-      }
-      if (map.getLayer(heatmapLayerId)) {
-        map.setLayoutProperty(heatmapLayerId, 'visibility', heatmapVisibility);
-        map.setPaintProperty(heatmapLayerId, 'heatmap-opacity', heatmapOpacityValue);
-      }
-    });
-  };
-
+  // Effect for updating layer visibility and paint properties
   useEffect(() => {
     if (!isMapLoaded || !mapRef.current) return;
-    updateLayerVisibility(mapRef.current, displayMode, selectedTimeWindows);
-  }, [displayMode, selectedTimeWindows, isMapLoaded]);
+    const map = mapRef.current;
+    const numTimeWindows = TIME_WINDOWS.length;
 
-  useEffect(() => {
-    if (!isMapLoaded || !mapRef.current || !currentBounds) {
-      return;
+    TIME_WINDOWS.forEach(tw => {
+      if (map.getLayer(`fill-layer-density-${tw.id}`)) map.setLayoutProperty(`fill-layer-density-${tw.id}`, 'visibility', 'none');
+      if (map.getLayer(`heatmap-layer-density-${tw.id}`)) map.setLayoutProperty(`heatmap-layer-density-${tw.id}`, 'visibility', 'none');
+    });
+    DIVERSITY_SCORE_INFO.forEach(dsi => {
+      if (map.getLayer(`fill-layer-diversity-${dsi.score}`)) map.setLayoutProperty(`fill-layer-diversity-${dsi.score}`, 'visibility', 'none');
+      if (map.getLayer(`heatmap-layer-diversity-per-score-${dsi.score}`)) map.setLayoutProperty(`heatmap-layer-diversity-per-score-${dsi.score}`, 'visibility', 'none');
+    });
+    if (map.getLayer('heatmap-layer-diversity-stacked')) map.setLayoutProperty('heatmap-layer-diversity-stacked', 'visibility', 'none');
+
+    if (dataSource === 'density') {
+      TIME_WINDOWS.forEach(tw => {
+        const isSelected = selectedTimeWindows.has(tw.id);
+        if (!isSelected) return;
+        const fillLayerId = `fill-layer-density-${tw.id}`;
+        const heatmapLayerId = `heatmap-layer-density-${tw.id}`;
+        const fillVisible = displayMode === 'fill';
+        const heatmapVisible = displayMode === 'heatmap';
+        if (map.getLayer(fillLayerId)) map.setLayoutProperty(fillLayerId, 'visibility', fillVisible ? 'visible' : 'none');
+        if (map.getLayer(heatmapLayerId)) map.setLayoutProperty(heatmapLayerId, 'visibility', heatmapVisible ? 'visible' : 'none');
+        if (fillVisible && map.getLayer(fillLayerId)) {
+          map.setPaintProperty(fillLayerId, 'fill-opacity', getMapboxOpacityExpression('density'));
+        }
+        if (heatmapVisible && map.getLayer(heatmapLayerId)) {
+          let relativeOpacity = HEATMAP_RELATIVE_MAX_OPACITY;
+          if (numTimeWindows > 1) {
+            const factor = tw.id / (numTimeWindows - 1);
+            relativeOpacity = HEATMAP_RELATIVE_MAX_OPACITY - factor * (HEATMAP_RELATIVE_MAX_OPACITY - HEATMAP_RELATIVE_MIN_OPACITY);
+            relativeOpacity = Math.max(HEATMAP_RELATIVE_MIN_OPACITY, Math.min(relativeOpacity, HEATMAP_RELATIVE_MAX_OPACITY));
+            if (tw.id === numTimeWindows - 1) relativeOpacity = HEATMAP_RELATIVE_MIN_OPACITY;
+            if (tw.id === 0) relativeOpacity = HEATMAP_RELATIVE_MAX_OPACITY;
+          }
+          map.setPaintProperty(heatmapLayerId, 'heatmap-opacity', relativeOpacity * heatmapOpacityRef.current);
+          map.setPaintProperty(heatmapLayerId, 'heatmap-weight', ['interpolate', ['linear'], ['get', 'density'], 0, 0, 1, 0.01, 255, 1]);
+          const ageFactor = numTimeWindows > 1 ? tw.id / (numTimeWindows - 1) : 0;
+          const ageRadiusMult = 0.7 + ageFactor * 0.6;
+          const intensityMult = 1.2 - ageFactor * 0.4;
+          map.setPaintProperty(heatmapLayerId, 'heatmap-radius', getHeatmapRadiusExpression(ageRadiusMult, 'density'));
+          map.setPaintProperty(heatmapLayerId, 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 3, Math.max(0.1, 1 * intensityMult), 7, Math.max(0.1, 1.5 * intensityMult), 9, Math.max(0.2, 2 * intensityMult), 12, Math.max(0.3, 3 * intensityMult), 15, Math.max(0.5, 5 * intensityMult), 18, Math.max(0.8, 8 * intensityMult)]);
+        }
+      });
+    } else { // dataSource === 'diversity'
+      if (displayMode === 'fill') {
+        DIVERSITY_SCORE_INFO.forEach(dsi => {
+          const scoreValue = dsi.score;
+          const isSelected = selectedDiversityScores.has(scoreValue);
+          const fillLayerId = `fill-layer-diversity-${scoreValue}`;
+          if (map.getLayer(fillLayerId)) {
+            map.setLayoutProperty(fillLayerId, 'visibility', isSelected ? 'visible' : 'none');
+            if (isSelected) {
+              map.setPaintProperty(fillLayerId, 'fill-opacity', getMapboxOpacityExpression('diversity'));
+            }
+          }
+        });
+      } else { // displayMode === 'heatmap'
+        const scoresArray = Array.from(selectedDiversityScores);
+        const diversityStackedFilter: ExpressionSpecification = scoresArray.length > 0
+          ? ['in', ['get', 'score'], ['literal', scoresArray]]
+          : ['boolean', false];
+
+        if (diversityHeatmapRenderMode === 'stacked') {
+          const stackedLayerId = 'heatmap-layer-diversity-stacked';
+          if (map.getLayer(stackedLayerId)) {
+            map.setLayoutProperty(stackedLayerId, 'visibility', 'visible');
+            map.setFilter(stackedLayerId, diversityStackedFilter);
+            map.setPaintProperty(stackedLayerId, 'heatmap-opacity', heatmapOpacityRef.current);
+            map.setPaintProperty(stackedLayerId, 'heatmap-radius', getHeatmapRadiusExpression(1.0, 'diversity'));
+            map.setPaintProperty(stackedLayerId, 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 3, 1, 9, 1.5, 12, 2]);
+          }
+        } else { // diversityHeatmapRenderMode === 'perScore'
+          DIVERSITY_SCORE_INFO.forEach(dsi => {
+            const scoreValue = dsi.score;
+            const isSelected = selectedDiversityScores.has(scoreValue);
+            const perScoreLayerId = `heatmap-layer-diversity-per-score-${scoreValue}`;
+            if (map.getLayer(perScoreLayerId)) {
+              map.setLayoutProperty(perScoreLayerId, 'visibility', isSelected ? 'visible' : 'none');
+              if (isSelected) {
+                map.setPaintProperty(perScoreLayerId, 'heatmap-opacity', heatmapOpacityRef.current);
+                map.setPaintProperty(perScoreLayerId, 'heatmap-radius', getHeatmapRadiusExpression(1.0, 'diversity'));
+                map.setPaintProperty(perScoreLayerId, 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 3, 1, 9, 1.5, 12, 2]);
+              }
+            }
+          });
+        }
+      }
     }
+  }, [isMapLoaded, displayMode, dataSource, selectedTimeWindows, selectedDiversityScores, heatmapRadiusScale, heatmapOpacity, diversityHeatmapRenderMode]);
 
+  // Effect for fetching and updating data in sources
+  useEffect(() => {
+    if (!isMapLoaded || !mapRef.current || !currentBounds) return;
     const map = mapRef.current;
     const activePromises: Promise<void>[] = [];
-    let anyWindowSelectedAndVisible = false;
+    let anyDataToFetch = false;
+    setIsLoading(true);
 
-    TIME_WINDOWS.forEach((timeWindow) => {
-      const sourceId = `source-${timeWindow.id}`;
-      const isSelected = selectedTimeWindows.has(timeWindow.id);
-      const isLayerVisibleForCurrentMode = (displayMode === 'fill' || displayMode === 'heatmap');
-
-      if (!isSelected || !isLayerVisibleForCurrentMode) {
-        const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
-        if (source?.setData) source.setData({ type: 'FeatureCollection', features: [] });
-        return;
-      }
-      anyWindowSelectedAndVisible = true;
-
+    if (dataSource === 'density') {
+      const diversitySource = map.getSource('source-diversity') as GeoJSONSource;
+      if (diversitySource?.setData) diversitySource.setData({ type: 'FeatureCollection', features: [] });
+      TIME_WINDOWS.forEach((timeWindow) => {
+        const sourceId = `source-density-${timeWindow.id}`;
+        const source = map.getSource(sourceId) as GeoJSONSource;
+        if (!selectedTimeWindows.has(timeWindow.id)) {
+          if (source?.setData) source.setData({ type: 'FeatureCollection', features: [] });
+          return;
+        }
+        anyDataToFetch = true;
+        const promise = (async () => {
+          try {
+            const params = new URLSearchParams({ time_window_id: timeWindow.id.toString(), level: currentApiLevel.toString(), min_lon: currentBounds.getWest().toString(), min_lat: currentBounds.getSouth().toString(), max_lon: currentBounds.getEast().toString(), max_lat: currentBounds.getNorth().toString() });
+            const response = await fetch(`/api/density?${params.toString()}`);
+            if (!response.ok) throw new Error(`API Error (density): ${response.status} ${await response.text()}`);
+            const data: ApiDensityResponse = await response.json();
+            const features = displayMode === 'fill' ? data.map(p => calculateCellPolygon(p, currentApiLevel)) : createHeatmapPoints(data);
+            if (source?.setData) source.setData({ type: 'FeatureCollection', features });
+          } catch (error) {
+            console.error(`Error fetching density for TW ${timeWindow.id}:`, error);
+            if (source?.setData) source.setData({ type: 'FeatureCollection', features: [] });
+          }
+        })();
+        activePromises.push(promise);
+      });
+    } else { // dataSource === 'diversity'
+      TIME_WINDOWS.forEach(tw => {
+        const densitySource = map.getSource(`source-density-${tw.id}`) as GeoJSONSource;
+        if (densitySource?.setData) densitySource.setData({ type: 'FeatureCollection', features: [] });
+      });
+      anyDataToFetch = true;
+      const sourceId = 'source-diversity';
+      const source = map.getSource(sourceId) as GeoJSONSource;
       const promise = (async () => {
         try {
-          const params = new URLSearchParams();
-          params.set('time_window_id', timeWindow.id.toString());
-          params.set('level', currentApiLevel.toString());
-          params.set('min_lon', currentBounds.getWest().toString());
-          params.set('min_lat', currentBounds.getSouth().toString());
-          params.set('max_lon', currentBounds.getEast().toString());
-          params.set('max_lat', currentBounds.getNorth().toString());
-
-          const apiEndpoint = densitySource === 'scaled' && displayMode === 'heatmap'
-            ? '/api/density-scaled'
-            : '/api/density';
-
-          const response = await fetch(`${apiEndpoint}?${params.toString()}`);
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API Error (${apiEndpoint}): ${response.status} ${response.statusText} - ${errorText}`);
-          }
-          const data: DensityApiResponse = await response.json();
-
-          let features: GeoJSON.Feature[] = [];
-          if (displayMode === 'fill') {
-            features = data.map(point => calculateCellPolygon(point, currentApiLevel));
-          } else {
-            features = createHeatmapPoints(data);
-          }
-
-          const newGeoJson: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features };
-          const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
-          if (source?.setData) {
-            source.setData(newGeoJson);
-          }
+          const params = new URLSearchParams({ radius_group_id: selectedRadiusGroupId.toString(), level: currentApiLevel.toString(), min_lon: currentBounds.getWest().toString(), min_lat: currentBounds.getSouth().toString(), max_lon: currentBounds.getEast().toString(), max_lat: currentBounds.getNorth().toString() });
+          const response = await fetch(`/api/diversity?${params.toString()}`);
+          if (!response.ok) throw new Error(`API Error (diversity): ${response.status} ${await response.text()}`);
+          const data: ApiDiversityResponse = await response.json();
+          const features = displayMode === 'fill' ? data.map(p => calculateCellPolygon(p, currentApiLevel)) : createHeatmapPoints(data);
+          if (source?.setData) source.setData({ type: 'FeatureCollection', features });
         } catch (error) {
-          const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource;
+          console.error(`Error fetching diversity data:`, error);
           if (source?.setData) source.setData({ type: 'FeatureCollection', features: [] });
         }
       })();
       activePromises.push(promise);
-    });
+    }
 
-    if (anyWindowSelectedAndVisible && activePromises.length > 0) {
-      setIsLoading(true);
-      Promise.all(activePromises).finally(() => {
-        setIsLoading(false);
-      });
+    if (anyDataToFetch && activePromises.length > 0) {
+      Promise.all(activePromises).finally(() => setIsLoading(false));
     } else {
       setIsLoading(false);
     }
-  }, [selectedTimeWindows, currentApiLevel, currentBounds, isMapLoaded, displayMode, densitySource]);
+  }, [selectedTimeWindows, selectedRadiusGroupId, currentApiLevel, currentBounds, isMapLoaded, displayMode, dataSource]);
 
 
   return (
