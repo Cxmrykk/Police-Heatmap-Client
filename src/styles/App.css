@@ -1,9 +1,6 @@
-/* src/styles/App.css - Add these or put in a separate controls.css */
-
 .app-container {
   display: flex;
   flex-direction: column;
-  /* Changed from row to column for controls on top */
   height: 100vh;
   width: 100vw;
   overflow: hidden;
@@ -13,31 +10,23 @@
 .controls-panel {
   padding: 10px 15px;
   background-color: #282c34;
-  /* Darker background */
   color: white;
   display: flex;
   flex-direction: row;
-  /* Arrange control groups in a row */
   gap: 25px;
   align-items: flex-start;
   flex-wrap: wrap;
-  /* Allow wrapping if too many groups */
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   z-index: 10;
   max-height: 40vh;
-  /* Limit height of controls panel */
   overflow-y: auto;
-  /* Allow scrolling within controls panel if content overflows */
 }
 
 .controls-panel>div {
-  /* Each direct child div is a control group */
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* Gap between title and items within a group */
   min-width: 180px;
-  /* Minimum width for a control group */
 }
 
 .controls-panel h3 {
@@ -46,13 +35,17 @@
   font-size: 0.95em;
   font-weight: 600;
   color: #61dafb;
-  /* Accent color for titles */
   border-bottom: 1px solid #444;
   padding-bottom: 4px;
 }
 
+.controls-panel h3 span[title],
+.controls-panel h4 span[title] {
+  cursor: help;
+}
+
+
 .controls-panel h4 {
-  /* For sub-titles like "Heatmap Parameters" */
   margin-top: 5px;
   margin-bottom: 10px;
   font-size: 0.9em;
@@ -74,7 +67,6 @@
   transform: scale(0.9);
 }
 
-/* New style for select dropdown */
 .control-select {
   padding: 4px 8px;
   border-radius: 4px;
@@ -99,7 +91,6 @@
   vertical-align: middle;
 }
 
-/* Styles for Heatmap Configuration Panel */
 .heatmap-config-panel {
   padding: 10px;
   border: 1px solid #444;
@@ -107,9 +98,7 @@
   background-color: #333842;
   display: flex;
   flex-direction: column;
-  /* Stack groups vertically */
   gap: 15px;
-  /* Gap between Radius, Intensity, Opacity groups */
 }
 
 .sliders-group {
@@ -128,7 +117,6 @@
 .control-slider-item {
   display: flex;
   flex-direction: column;
-  /* Label on top of slider */
   gap: 4px;
   font-size: 0.8em;
 }
@@ -144,10 +132,8 @@
 
 .map-container-wrapper {
   flex-grow: 1;
-  /* Map takes remaining space */
   position: relative;
   background-color: #1e1e1e;
-  /* Dark background for map area if map doesn't load */
 }
 
 .loading-overlay {
@@ -166,7 +152,6 @@
 }
 
 .error-message {
-  /* For Mapbox token error */
   padding: 20px;
   text-align: center;
   color: #ff6b6b;
@@ -178,25 +163,18 @@
   justify-content: center;
 }
 
-/* Metadata Overlay Styles */
 .metadata-overlay {
   position: fixed;
   bottom: 10px;
   right: 10px;
   background-color: rgba(30, 30, 30, 0.85);
-  /* Darker, slightly more opaque */
   color: #e0e0e0;
-  /* Lighter text color for better contrast */
   padding: 10px 15px;
   border-radius: 6px;
   font-size: 0.8rem;
-  /* Slightly smaller font */
   z-index: 1000;
-  /* Ensure it's above the map */
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  /* Softer shadow */
   max-width: 300px;
-  /* Prevent it from being too wide */
 }
 
 .metadata-overlay p {
