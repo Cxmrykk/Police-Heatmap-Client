@@ -1,21 +1,13 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'; // Added useMemo
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { LngLatBounds, Map as MapboxMap } from 'mapbox-gl';
 import MapDisplay from './components/MapDisplay';
-import { TIME_WINDOWS, DIVERSITY_RADIUS_OPTIONS, DIVERSITY_SCORE_INFO, mapboxZoomToApiLevel, MIN_API_LEVEL, MAX_API_LEVEL } from './utils/mapUtils';
-import type { DisplayMode, DataSourceType, DiversityHeatmapRenderMode, AppMetadata } from './types';
+import { DIVERSITY_RADIUS_OPTIONS, DIVERSITY_SCORE_INFO, mapboxZoomToApiLevel, MIN_API_LEVEL, MAX_API_LEVEL } from './utils/mapUtils';
+import type { DisplayMode, DiversityHeatmapRenderMode, AppMetadata } from './types';
 import './styles/App.css';
 
 const DEFAULT_HEATMAP_OPACITY = 0.85;
 
 function App() {
-  const [selectedTimeWindows, setSelectedTimeWindows] = useState<Set<number>>(() => {
-    const initialSelection = new Set<number>();
-    if (TIME_WINDOWS.length > 0) {
-      initialSelection.add(TIME_WINDOWS[0].id);
-    }
-    return initialSelection;
-  });
-
   const [selectedDiversityScores, setSelectedDiversityScores] = useState<Set<number>>(() =>
     new Set(DIVERSITY_SCORE_INFO.map(dsi => dsi.score))
   );
@@ -25,7 +17,6 @@ function App() {
   const [mapInstance, setMapInstance] = useState<MapboxMap | null>(null);
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>('heatmap');
-  const [dataSource, setDataSource] = useState<DataSourceType>('density');
   const [selectedRadiusGroupId, setSelectedRadiusGroupId] = useState<number>(0);
   const [heatmapRadiusScale, setHeatmapRadiusScale] = useState<number>(1.0);
   const [heatmapOpacity, setHeatmapOpacity] = useState<number>(DEFAULT_HEATMAP_OPACITY);
@@ -59,15 +50,6 @@ function App() {
     fetchMetadata();
   }, []);
 
-  const handleTimeWindowChange = (id: number) => {
-    setSelectedTimeWindows(prev => {
-      const newSelection = new Set(prev);
-      if (newSelection.has(id)) newSelection.delete(id);
-      else newSelection.add(id);
-      return newSelection;
-    });
-  };
-
   const handleDiversityScoreChange = (score: number) => {
     setSelectedDiversityScores(prev => {
       const newSelection = new Set(prev);
@@ -78,7 +60,6 @@ function App() {
   };
 
   const handleDisplayModeChange = (mode: DisplayMode) => setDisplayMode(mode);
-  const handleDataSourceChange = (source: DataSourceType) => setDataSource(source);
   const handleRadiusGroupChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedRadiusGroupId(parseInt(event.target.value, 10));
   };
@@ -151,7 +132,6 @@ function App() {
     return <div className="error-message">Error: Mapbox token (VITE_MAPBOX_TOKEN) is not configured.</div>;
   }
 
-  // Memoize initialMapCenter to prevent unnecessary re-renders of MapDisplay
   const initialMapCenter = useMemo<[number, number] | undefined>(() => {
     if (appMetadata?.center_longitude && appMetadata?.center_latitude) {
       return [parseFloat(appMetadata.center_longitude), parseFloat(appMetadata.center_latitude)];
@@ -163,46 +143,23 @@ function App() {
   return (
     <div className="app-container">
       <div className="controls-panel">
-        {dataSource === 'density' && (
-          <div>
-            <h3>Time Windows (Density):</h3>
-            {TIME_WINDOWS.map(tw => (
-              <label key={tw.id} className="control-item">
-                <input type="checkbox" checked={selectedTimeWindows.has(tw.id)} onChange={() => handleTimeWindowChange(tw.id)} />
-                <span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: tw.color, marginRight: '5px', border: '1px solid #555' }}></span>
-                {tw.name}
-              </label>
-            ))}
-          </div>
-        )}
-
-        {dataSource === 'diversity' && (
-          <div>
-            <h3>Diversity Scores:</h3>
-            {DIVERSITY_SCORE_INFO.map(dsi => (
-              <label key={dsi.score} className="control-item">
-                <input type="checkbox" checked={selectedDiversityScores.has(dsi.score)} onChange={() => handleDiversityScoreChange(dsi.score)} />
-                <span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: dsi.color, marginRight: '5px', border: '1px solid #555' }}></span>
-                {dsi.name}
-              </label>
-            ))}
-          </div>
-        )}
-
         <div>
-          <h3>Data Source:</h3>
-          <label className="control-item"><input type="radio" name="dataSource" value="density" checked={dataSource === 'density'} onChange={() => handleDataSourceChange('density')} /> Density</label>
-          <label className="control-item"><input type="radio" name="dataSource" value="diversity" checked={dataSource === 'diversity'} onChange={() => handleDataSourceChange('diversity')} /> Temporal Diversity</label>
+          <h3>Temporal Diversity Scores:</h3>
+          {DIVERSITY_SCORE_INFO.map(dsi => (
+            <label key={dsi.score} className="control-item">
+              <input type="checkbox" checked={selectedDiversityScores.has(dsi.score)} onChange={() => handleDiversityScoreChange(dsi.score)} />
+              <span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: dsi.color, marginRight: '5px', border: '1px solid #555' }}></span>
+              {dsi.name}
+            </label>
+          ))}
         </div>
 
-        {dataSource === 'diversity' && (
-          <div>
-            <h3>Diversity Radius:</h3>
-            <select value={selectedRadiusGroupId} onChange={handleRadiusGroupChange} className="control-item control-select">
-              {DIVERSITY_RADIUS_OPTIONS.map(opt => (<option key={opt.id} value={opt.id}>{opt.label}</option>))}
-            </select>
-          </div>
-        )}
+        <div>
+          <h3>Diversity Radius:</h3>
+          <select value={selectedRadiusGroupId} onChange={handleRadiusGroupChange} className="control-item control-select">
+            {DIVERSITY_RADIUS_OPTIONS.map(opt => (<option key={opt.id} value={opt.id}>{opt.label}</option>))}
+          </select>
+        </div>
 
         <div>
           <h3>Precision Level (L{currentApiLevel}):</h3>
@@ -242,31 +199,26 @@ function App() {
               <span>Opacity: ({(heatmapOpacity * 100).toFixed(0)}%)</span>
               <input type="range" min="0.0" max="1.0" step="0.05" value={heatmapOpacity} onChange={handleHeatmapOpacityChange} style={{ width: '100px' }} />
             </div>
-
-            {dataSource === 'diversity' && (
-              <div style={{ marginTop: '10px' }}>
-                <h4>Diversity Heatmap Style:</h4>
-                <label className="control-item">
-                  <input type="radio" name="diversityHeatmapMode" value="stacked" checked={diversityHeatmapMode === 'stacked'} onChange={() => handleDiversityHeatmapModeChange('stacked')} />
-                  Stacked (Original)
-                </label>
-                <label className="control-item">
-                  <input type="radio" name="diversityHeatmapMode" value="perScore" checked={diversityHeatmapMode === 'perScore'} onChange={() => handleDiversityHeatmapModeChange('perScore')} />
-                  Per Score Layer
-                </label>
-              </div>
-            )}
+            <div style={{ marginTop: '10px' }}>
+              <h4>Diversity Heatmap Style:</h4>
+              <label className="control-item">
+                <input type="radio" name="diversityHeatmapMode" value="stacked" checked={diversityHeatmapMode === 'stacked'} onChange={() => handleDiversityHeatmapModeChange('stacked')} />
+                Stacked (Original)
+              </label>
+              <label className="control-item">
+                <input type="radio" name="diversityHeatmapMode" value="perScore" checked={diversityHeatmapMode === 'perScore'} onChange={() => handleDiversityHeatmapModeChange('perScore')} />
+                Per Score Layer
+              </label>
+            </div>
           </div>
         )}
       </div>
       <MapDisplay
-        selectedTimeWindows={selectedTimeWindows}
         selectedDiversityScores={selectedDiversityScores}
         onMapIdle={handleMapIdle}
         currentApiLevel={currentApiLevel}
         currentBounds={currentBounds}
         displayMode={displayMode}
-        dataSource={dataSource}
         selectedRadiusGroupId={selectedRadiusGroupId}
         heatmapRadiusScale={heatmapRadiusScale}
         heatmapOpacity={heatmapOpacity}
