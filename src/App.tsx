@@ -143,7 +143,7 @@ function App() {
       <div className="controls-panel">
         <div>
           <h3>
-            <span title="Filters the map to show only cells with the selected temporal diversity scores. Temporal diversity measures how many different time windows (e.g., 'last 7 days', '7-14 days ago') have recent police reports within a small radius around each cell. A higher score indicates more varied reporting times, suggesting persistent activity rather than isolated incidents. Each score is represented by a distinct color.">
+            <span title="Temporal diversity measures how many different time windows have recent police reports within a small radius around each cell. There are total four different time windows (e.g., 'last 7 days', '7-14 days ago', '14-30 days ago' and '30-90 days ago'). A higher score indicates more varied reporting times, suggesting persistent activity. Each score is represented by a distinct color.">
               ⓘ Temporal Diversity Scores:
             </span>
           </h3>

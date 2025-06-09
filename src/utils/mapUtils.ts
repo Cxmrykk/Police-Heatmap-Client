@@ -15,10 +15,10 @@ export const DIVERSITY_RADIUS_OPTIONS = [
 export const NUM_DIVERSITY_RADIUS_GROUPS = DIVERSITY_RADIUS_OPTIONS.length;
 
 export const DIVERSITY_SCORE_INFO = [
-  { score: 1, name: "Score 1 (Lowest Diversity)", color: "#0000FF" },
-  { score: 2, name: "Score 2", color: "#00FF00" },
-  { score: 3, name: "Score 3", color: "#FFFF00" },
-  { score: 4, name: "Score 4 (Highest Diversity)", color: "#FF0000" },
+  { score: 1, name: "Low (Score = 1)", color: "#0000FF" },
+  { score: 2, name: "Moderate (Score = 2)", color: "#00FF00" },
+  { score: 3, name: "High (Score = 3)", color: "#FFFF00" },
+  { score: 4, name: "Very High (Score = 4)", color: "#FF0000" },
 ];
 
 export function mapboxZoomToApiLevel(mapboxZoom: number): number {
