@@ -9,7 +9,8 @@ const DEFAULT_HEATMAP_OPACITY = 0.85;
 
 function App() {
   const [selectedDiversityScores, setSelectedDiversityScores] = useState<Set<number>>(() =>
-    new Set(DIVERSITY_SCORE_INFO.map(dsi => dsi.score))
+    //new Set(DIVERSITY_SCORE_INFO.map(dsi => dsi.score))
+    new Set([3, 4]) // Display high and very high by default
   );
 
   const [currentApiLevel, setCurrentApiLevel] = useState<number>(MIN_API_LEVEL);
@@ -17,7 +18,7 @@ function App() {
   const [mapInstance, setMapInstance] = useState<MapboxMap | null>(null);
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>('heatmap');
-  const [selectedRadiusGroupId, setSelectedRadiusGroupId] = useState<number>(0);
+  const [selectedRadiusGroupId, setSelectedRadiusGroupId] = useState<number>(1); // Radius M
   const [heatmapRadiusScale, setHeatmapRadiusScale] = useState<number>(1.0);
   const [heatmapOpacity, setHeatmapOpacity] = useState<number>(DEFAULT_HEATMAP_OPACITY);
   const [diversityHeatmapMode, setDiversityHeatmapMode] = useState<DiversityHeatmapRenderMode>('stacked');
